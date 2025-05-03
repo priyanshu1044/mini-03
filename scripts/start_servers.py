@@ -9,10 +9,12 @@ import time
 import signal
 import argparse
 import subprocess
+import traceback
 from typing import List, Dict
 
 # Get the absolute path to the project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 def start_server(server_id: str) -> subprocess.Popen:
     """Start a server process with the given ID."""
@@ -24,7 +26,8 @@ def start_server(server_id: str) -> subprocess.Popen:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
-        bufsize=1  # Line buffered
+        bufsize=1,  # Line buffered
+        env=os.environ.copy()  # Pass environment variables
     )
     
     print(f"Started server {server_id} with PID {process.pid}")
@@ -72,24 +75,32 @@ def main():
                       help="Comma-separated list of server IDs to start")
     parser.add_argument("--local-only", action="store_true",
                       help="Only start servers configured for the local machine")
+    parser.add_argument("--debug", action="store_true",
+                      help="Print full error traceback for debugging")
     args = parser.parse_args()
     
     # Get server IDs to start
     if args.local_only:
         # Import server config to get the list of nodes
         sys.path.append(PROJECT_ROOT)
-        from src.server.config import NODES
-        
-        # Detect local hostname or IP
-        import socket
-        local_hostname = socket.gethostname()
-        local_ip = socket.gethostbyname(local_hostname)
-        
-        # Get servers configured for this machine
-        server_ids = []
-        for node in NODES:
-            if node["host"] in ("localhost", "127.0.0.1", local_hostname, local_ip):
-                server_ids.append(node["id"])
+        try:
+            from src.server.config import NODES
+            
+            # Detect local hostname or IP
+            import socket
+            local_hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(local_hostname)
+            
+            # Get servers configured for this machine
+            server_ids = []
+            for node in NODES:
+                if node["host"] in ("localhost", "127.0.0.1", local_hostname, local_ip):
+                    server_ids.append(node["id"])
+        except Exception as e:
+            print(f"Error determining local servers: {e}")
+            if args.debug:
+                traceback.print_exc()
+            return
     else:
         server_ids = args.servers.split(",")
     
@@ -109,6 +120,11 @@ def main():
         
         # Monitor output from all processes
         monitor_output(processes)
+    
+    except Exception as e:
+        print(f"Error starting servers: {e}")
+        if args.debug:
+            traceback.print_exc()
     
     finally:
         # Make sure we clean up on exit

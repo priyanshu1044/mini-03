@@ -12,25 +12,17 @@ from typing import Dict, List, Optional, Tuple
 import grpc
 import psutil
 
-# Add the src directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the parent directory to the Python path so imports work correctly
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(os.path.dirname(current_dir))
+sys.path.insert(0, parent_dir)
 
-from server.config import ServerConfig, get_server_config, NODES
-from server.utils import ResourceMonitor, MessageData, SystemMetrics
+from src.server.config import ServerConfig, get_server_config, NODES
+from src.server.utils import ResourceMonitor, MessageData, SystemMetrics
 
 # Import the generated protocol buffer code
-from src.replication_pb2 import (
-    HeartbeatRequest, HeartbeatResponse,
-    StoreRequest, StoreResponse,
-    GetRequest, GetResponse,
-    StealRequest, StealResponse,
-    MetricsRequest, MetricsResponse,
-    Message
-)
-from src.replication_pb2_grpc import (
-    ReplicationServiceServicer,
-    add_ReplicationServiceServicer_to_server
-)
+import src.replication_pb2 as replication_pb2
+import src.replication_pb2_grpc as replication_pb2_grpc
 
 # Configure logging
 logging.basicConfig(
@@ -43,7 +35,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ReplicationServer(ReplicationServiceServicer):
+class ReplicationServer(replication_pb2_grpc.ReplicationServiceServicer):
     """
     Implementation of the ReplicationService service.
     Handles message replication, load balancing, and NWR parameter management.
@@ -105,7 +97,7 @@ class ReplicationServer(ReplicationServiceServicer):
             load_score = self.resource_monitor.get_load_score()
             
             # Prepare heartbeat request
-            request = HeartbeatRequest(
+            request = replication_pb2.HeartbeatRequest(
                 server_id=self.server_id,
                 load_score=load_score,
                 queue_size=metrics.queue_size,
@@ -119,7 +111,7 @@ class ReplicationServer(ReplicationServiceServicer):
                 if node_id != self.server_id:
                     try:
                         channel = self._connect_to_node(node_id)
-                        stub = src.replication_pb2_grpc.ReplicationServiceStub(channel)
+                        stub = replication_pb2_grpc.ReplicationServiceStub(channel)
                         response = stub.Heartbeat(request, timeout=1.0)
                         
                         # Update node status
@@ -230,7 +222,7 @@ class ReplicationServer(ReplicationServiceServicer):
         metrics = self.resource_monitor.update_metrics()
         load_score = self.resource_monitor.get_load_score()
         
-        return HeartbeatResponse(
+        return replication_pb2.HeartbeatResponse(
             is_alive=True,
             server_id=self.server_id,
             load_score=load_score
@@ -264,10 +256,10 @@ class ReplicationServer(ReplicationServiceServicer):
             if node_id != self.server_id:
                 try:
                     channel = self._connect_to_node(node_id)
-                    stub = src.replication_pb2_grpc.ReplicationServiceStub(channel)
+                    stub = replication_pb2_grpc.ReplicationServiceStub(channel)
                     
                     # Send the same replication request to other nodes
-                    store_request = StoreRequest(
+                    store_request = replication_pb2.StoreRequest(
                         message_id=message_id,
                         content=content,
                         replica_servers=replica_servers
@@ -285,7 +277,7 @@ class ReplicationServer(ReplicationServiceServicer):
         message = (f"Message stored on {successful_writes}/{self.min_writes} "
                  f"required nodes")
         
-        return StoreResponse(
+        return replication_pb2.StoreResponse(
             success=success,
             message=message,
             stored_on=stored_on
@@ -300,7 +292,7 @@ class ReplicationServer(ReplicationServiceServicer):
         logger.info(f"Received get request for message {message_id}")
         
         # Check if we have the message locally
-        message = self.resource_monitor.message_queue.get(message_id)
+        message = self.resource_monitor.get_message(message_id)
         
         if message:
             # We found it locally, check if we need to talk to other replicas
@@ -317,9 +309,9 @@ class ReplicationServer(ReplicationServiceServicer):
                     if node_id != self.server_id:
                         try:
                             channel = self._connect_to_node(node_id)
-                            stub = src.replication_pb2_grpc.ReplicationServiceStub(channel)
+                            stub = replication_pb2_grpc.ReplicationServiceStub(channel)
                             
-                            response = stub.GetMessage(GetRequest(message_id=message_id), 
+                            response = stub.GetMessage(replication_pb2.GetRequest(message_id=message_id), 
                                                     timeout=2.0)
                             
                             if response.found:
@@ -328,14 +320,14 @@ class ReplicationServer(ReplicationServiceServicer):
                         except Exception as e:
                             logger.error(f"Failed to read message from {node_id}: {e}")
                 
-                return GetResponse(
+                return replication_pb2.GetResponse(
                     found=successful_reads >= self.min_reads,
                     content=local_content if successful_reads >= self.min_reads else "",
                     replica_locations=all_replicas
                 )
             else:
                 # We have enough replicas locally
-                return GetResponse(
+                return replication_pb2.GetResponse(
                     found=True,
                     content=local_content,
                     replica_locations=[self.server_id]
@@ -347,9 +339,9 @@ class ReplicationServer(ReplicationServiceServicer):
                 if node_id != self.server_id:
                     try:
                         channel = self._connect_to_node(node_id)
-                        stub = src.replication_pb2_grpc.ReplicationServiceStub(channel)
+                        stub = replication_pb2_grpc.ReplicationServiceStub(channel)
                         
-                        response = stub.GetMessage(GetRequest(message_id=message_id), 
+                        response = stub.GetMessage(replication_pb2.GetRequest(message_id=message_id), 
                                                 timeout=2.0)
                         
                         if response.found:
@@ -358,7 +350,7 @@ class ReplicationServer(ReplicationServiceServicer):
                         logger.error(f"Failed to check message on {node_id}: {e}")
             
             # Not found anywhere
-            return GetResponse(
+            return replication_pb2.GetResponse(
                 found=False,
                 content="",
                 replica_locations=[]
@@ -373,7 +365,7 @@ class ReplicationServer(ReplicationServiceServicer):
         
         # Check if we have enough load to allow stealing
         if not self.resource_monitor.should_allow_stealing(self.config.steal_threshold):
-            return StealResponse(stolen_messages=[])
+            return replication_pb2.StealResponse(stolen_messages=[])
         
         # Get messages that can be stolen
         stolen_messages = self.resource_monitor.steal_messages(max_messages)
@@ -381,7 +373,7 @@ class ReplicationServer(ReplicationServiceServicer):
         # Convert to protobuf messages
         proto_messages = []
         for msg in stolen_messages:
-            proto_messages.append(Message(
+            proto_messages.append(replication_pb2.Message(
                 message_id=msg.message_id,
                 content=msg.content,
                 replicas=msg.replicas,
@@ -390,7 +382,7 @@ class ReplicationServer(ReplicationServiceServicer):
         
         logger.info(f"Allowing server {requesting_server} to steal {len(proto_messages)} messages")
         
-        return StealResponse(stolen_messages=proto_messages)
+        return replication_pb2.StealResponse(stolen_messages=proto_messages)
 
     def GetMetrics(self, request, context):
         """
@@ -399,7 +391,7 @@ class ReplicationServer(ReplicationServiceServicer):
         metrics = self.resource_monitor.update_metrics()
         load_score = self.resource_monitor.get_load_score()
         
-        return MetricsResponse(
+        return replication_pb2.MetricsResponse(
             cpu_percent=metrics.cpu_percent,
             memory_percent=metrics.memory_percent,
             queue_size=metrics.queue_size,
@@ -412,7 +404,7 @@ def serve(server_id: str, max_workers: int = 10):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
     
     servicer = ReplicationServer(server_id)
-    add_ReplicationServiceServicer_to_server(servicer, server)
+    replication_pb2_grpc.add_ReplicationServiceServicer_to_server(servicer, server)
     
     server_address = f"{server_config.host}:{server_config.port}"
     server.add_insecure_port(server_address)
