@@ -1,19 +1,39 @@
 """Server configuration."""
 import os
+import socket
 from dataclasses import dataclass
 from typing import Dict, List, Optional
+
+# Detect local IP address to help with cross-machine communication
+def get_local_ip():
+    try:
+        # This creates a socket that doesn't actually connect but helps us determine the IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Use a public DNS server to determine what our IP would be (doesn't actually send data)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        # Fallback to localhost if we can't determine the IP
+        return "127.0.0.1"
+
+# Get the local IP address
+LOCAL_IP = get_local_ip()
+# Define the remote IP address
+REMOTE_IP = "10.0.0.223"
 
 # Server node configurations
 # In a real deployment, these would be distributed across multiple machines
 NODES = [
-    {"id": "server1", "host": "localhost", "port": 50051},
-    {"id": "server2", "host": "localhost", "port": 50052},
-    {"id": "server3", "host": "localhost", "port": 50053},
-    {"id": "server4", "host": "localhost", "port": 50054},
-    {"id": "server5", "host": "localhost", "port": 50055},
+    {"id": "server1", "host": LOCAL_IP, "port": 50051},
+    {"id": "server2", "host": LOCAL_IP, "port": 50052},
+    {"id": "server3", "host": LOCAL_IP, "port": 50053},
+    {"id": "server4", "host": LOCAL_IP, "port": 50054},
+    {"id": "server5", "host": LOCAL_IP, "port": 50055},
     # Configuration for the second computer
-    {"id": "server6", "host": "10.0.0.223", "port": 50051},
-    {"id": "server7", "host": "10.0.0.223", "port": 50052},
+    {"id": "server6", "host": REMOTE_IP, "port": 50051},
+    {"id": "server7", "host": REMOTE_IP, "port": 50052},
 ]
 
 @dataclass

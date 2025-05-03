@@ -406,11 +406,20 @@ def serve(server_id: str, max_workers: int = 10):
     servicer = ReplicationServer(server_id)
     replication_pb2_grpc.add_ReplicationServiceServicer_to_server(servicer, server)
     
-    server_address = f"{server_config.host}:{server_config.port}"
+    # Decide whether to bind to all interfaces (for cross-machine communication)
+    # or just to the specified host
+    if server_config.host in ["127.0.0.1", "localhost"]:
+        # Bind to specified localhost address
+        server_address = f"{server_config.host}:{server_config.port}"
+    else:
+        # Bind to all interfaces for cross-machine communication
+        server_address = f"0.0.0.0:{server_config.port}"
+        
+    # Add the address to the server and start it
     server.add_insecure_port(server_address)
     server.start()
     
-    logger.info(f"Server {server_id} started on {server_address}")
+    logger.info(f"Server {server_id} started on {server_address} (configured as {server_config.host}:{server_config.port})")
     
     try:
         # Keep the server running until interrupted
