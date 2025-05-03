@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 import grpc
 import psutil
 
-# Add the parent directory to the Python path so imports work correctly
+# Add the src directory to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(os.path.dirname(current_dir))
 sys.path.insert(0, parent_dir)
@@ -21,8 +21,8 @@ from src.server.config import ServerConfig, get_server_config, NODES
 from src.server.utils import ResourceMonitor, MessageData, SystemMetrics
 
 # Import the generated protocol buffer code
-import src.replication_pb2 as replication_pb2
-import src.replication_pb2_grpc as replication_pb2_grpc
+from src import replication_pb2
+from src import replication_pb2_grpc
 
 # Configure logging
 logging.basicConfig(
